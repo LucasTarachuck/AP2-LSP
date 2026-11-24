@@ -668,6 +668,14 @@ class _TelaReceitasState extends State<TelaReceitas> {
         foregroundColor: Colors.white,
         actions: [
           IconButton(
+            tooltip: 'Comunidade de receitas',
+            icon: const Icon(Icons.groups_outlined),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const TelaComunidade()),
+            ),
+          ),
+          IconButton(
             tooltip: 'Meu perfil',
             icon: const Icon(Icons.account_circle_outlined),
             onPressed: () {
@@ -1137,6 +1145,352 @@ class _TelaReceitasState extends State<TelaReceitas> {
   }
 }
 
+
+// COMUNIDADE: receitas publicadas por usuários (separadas do catálogo)
+class TelaComunidade extends StatefulWidget {
+  const TelaComunidade({super.key});
+
+  @override
+  State<TelaComunidade> createState() => _TelaComunidadeState();
+}
+
+class _TelaComunidadeState extends State<TelaComunidade> {
+  late Future<List<Map<String, dynamic>>> publicacoes;
+
+  @override
+  void initState() {
+    super.initState();
+    atualizar();
+  }
+
+  void atualizar() {
+    setState(() {
+      publicacoes = buscarPublicacoes();
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> buscarPublicacoes() async {
+    final dados = await supabase
+        .from('receita_comunidade')
+        .select('id, id_usuario, nome_autor, nome, descricao, imagem_url, tempo_preparo_min, ingredientes, utensilios, modo_preparo, criado_em')
+        .order('criado_em', ascending: false);
+    return List<Map<String, dynamic>>.from(dados);
+  }
+
+  Future<void> excluir(int id) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Excluir publicação?'),
+        content: const Text('Essa ação não pode ser desfeita.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Excluir')),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+    try {
+      await supabase.from('receita_comunidade').delete().eq('id', id);
+      if (mounted) atualizar();
+    } catch (erro) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao excluir: $erro')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final autenticado = supabase.auth.currentUser != null;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Comunidade de receitas'),
+        backgroundColor: Colors.deepOrange,
+        foregroundColor: Colors.white,
+        actions: [IconButton(onPressed: atualizar, icon: const Icon(Icons.refresh), tooltip: 'Atualizar')],
+      ),
+      floatingActionButton: autenticado
+          ? FloatingActionButton.extended(
+              onPressed: () async {
+                final publicou = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(builder: (_) => const TelaPublicarReceita()),
+                );
+                if (publicou == true && mounted) atualizar();
+              },
+              backgroundColor: Colors.deepOrange,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add),
+              label: const Text('Publicar receita'),
+            )
+          : null,
+      body: Column(
+        children: [
+          if (!autenticado)
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: Card(
+                child: ListTile(
+                  leading: Icon(Icons.lock_outline, color: Colors.deepOrange),
+                  title: Text('Você está no modo visitante'),
+                  subtitle: Text('Entre com sua conta para publicar receitas.'),
+                ),
+              ),
+            ),
+          Expanded(
+            child: FutureBuilder<List<Map<String, dynamic>>>(
+              future: publicacoes,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError) {
+                  return Center(child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Text('Erro ao carregar comunidade: ${snapshot.error}', textAlign: TextAlign.center),
+                      const SizedBox(height: 12),
+                      ElevatedButton(onPressed: atualizar, child: const Text('Tentar novamente')),
+                    ]),
+                  ));
+                }
+                final itens = snapshot.data ?? [];
+                if (itens.isEmpty) {
+                  return const Center(child: Text('Ainda não há receitas publicadas pela comunidade.'));
+                }
+                return Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 850),
+                    child: ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
+                      itemCount: itens.length,
+                      itemBuilder: (context, index) {
+                        final item = itens[index];
+                        final imagem = (item['imagem_url'] ?? '').toString();
+                        final autor = (item['nome_autor'] ?? 'Usuário').toString();
+                        final meu = supabase.auth.currentUser?.id == item['id_usuario'];
+                        return Card(
+                          clipBehavior: Clip.antiAlias,
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.all(12),
+                            leading: SizedBox(
+                              width: 75, height: 75,
+                              child: imagem.isEmpty
+                                  ? const Icon(Icons.restaurant, color: Colors.deepOrange, size: 40)
+                                  : Image.network(imagem, fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => const Icon(Icons.restaurant, size: 40)),
+                            ),
+                            title: Text((item['nome'] ?? 'Receita').toString(),
+                                style: const TextStyle(fontWeight: FontWeight.bold)),
+                            subtitle: Text('Por $autor\n${item['tempo_preparo_min']} minutos', maxLines: 2),
+                            isThreeLine: true,
+                            trailing: meu
+                                ? IconButton(
+                                    tooltip: 'Excluir minha receita',
+                                    onPressed: () => excluir(item['id'] as int),
+                                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                  )
+                                : const Icon(Icons.chevron_right),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => TelaDetalheComunidade(receita: item)),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class TelaPublicarReceita extends StatefulWidget {
+  const TelaPublicarReceita({super.key});
+
+  @override
+  State<TelaPublicarReceita> createState() => _TelaPublicarReceitaState();
+}
+
+class _TelaPublicarReceitaState extends State<TelaPublicarReceita> {
+  final formKey = GlobalKey<FormState>();
+  final nome = TextEditingController();
+  final descricao = TextEditingController();
+  final imagem = TextEditingController();
+  final tempo = TextEditingController();
+  final ingredientes = TextEditingController();
+  final utensilios = TextEditingController();
+  final preparo = TextEditingController();
+  bool salvando = false;
+
+  @override
+  void dispose() {
+    for (final controller in [nome, descricao, imagem, tempo, ingredientes, utensilios, preparo]) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> publicar() async {
+    if (!formKey.currentState!.validate()) return;
+    final usuario = supabase.auth.currentUser;
+    if (usuario == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Entre na sua conta para publicar receitas.')),
+      );
+      return;
+    }
+    setState(() => salvando = true);
+    try {
+      final nomeAutor = (usuario.userMetadata?['nome'] ?? 'Usuário').toString().trim();
+      await supabase.from('receita_comunidade').insert({
+        'id_usuario': usuario.id,
+        'nome_autor': nomeAutor.isEmpty ? 'Usuário' : nomeAutor,
+        'nome': nome.text.trim(),
+        'descricao': descricao.text.trim(),
+        'imagem_url': imagem.text.trim().isEmpty ? null : imagem.text.trim(),
+        'tempo_preparo_min': int.parse(tempo.text.trim()),
+        'ingredientes': ingredientes.text.trim(),
+        'utensilios': utensilios.text.trim(),
+        'modo_preparo': preparo.text.trim(),
+      });
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (erro) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Não foi possível publicar: $erro')));
+    } finally {
+      if (mounted) setState(() => salvando = false);
+    }
+  }
+
+  Widget campo(TextEditingController controller, String titulo,
+      {int linhas = 1, bool obrigatorio = true, TextInputType? teclado}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: TextFormField(
+        controller: controller,
+        maxLines: linhas,
+        keyboardType: teclado,
+        maxLength: linhas > 1 ? 4000 : 200,
+        decoration: InputDecoration(labelText: titulo, border: const OutlineInputBorder(), alignLabelWithHint: linhas > 1),
+        validator: (valor) {
+          if (obrigatorio && (valor == null || valor.trim().isEmpty)) return 'Preencha $titulo';
+          if (controller == tempo) {
+            final n = int.tryParse(valor?.trim() ?? '');
+            if (n == null || n <= 0 || n > 1440) return 'Informe um tempo de 1 a 1440 minutos';
+          }
+          if (controller == imagem && (valor ?? '').trim().isNotEmpty) {
+            final url = Uri.tryParse(valor!.trim());
+            if (url == null || !url.hasAuthority || (url.scheme != 'https' && url.scheme != 'http')) {
+              return 'Informe uma URL http ou https válida';
+            }
+          }
+          return null;
+        },
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Publicar receita'), backgroundColor: Colors.deepOrange, foregroundColor: Colors.white),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 700),
+          child: Form(
+            key: formKey,
+            child: ListView(
+              padding: const EdgeInsets.all(20),
+              children: [
+                const Text('Compartilhe sua receita com a comunidade!', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 20),
+                campo(nome, 'Nome da receita'),
+                campo(descricao, 'Descrição', linhas: 3),
+                campo(imagem, 'URL da imagem (opcional)', obrigatorio: false),
+                campo(tempo, 'Tempo de preparo (minutos)', teclado: TextInputType.number),
+                campo(ingredientes, 'Ingredientes (um por linha)', linhas: 5),
+                campo(utensilios, 'Utensílios (um por linha)', linhas: 3),
+                campo(preparo, 'Modo de preparo (uma etapa por linha)', linhas: 7),
+                ElevatedButton.icon(
+                  onPressed: salvando ? null : publicar,
+                  icon: const Icon(Icons.publish),
+                  label: Text(salvando ? 'Publicando...' : 'Publicar receita'),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.deepOrange, foregroundColor: Colors.white,
+                      padding: const EdgeInsets.all(16)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class TelaDetalheComunidade extends StatelessWidget {
+  final Map<String, dynamic> receita;
+  const TelaDetalheComunidade({super.key, required this.receita});
+
+  Widget secao(String titulo, String valor, {bool numerada = false}) {
+    final linhas = valor.split('\n').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 24),
+        Text(titulo, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        if (linhas.isEmpty) const Text('Não informado.'),
+        for (var i = 0; i < linhas.length; i++)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 5),
+            child: Text(numerada ? '${i + 1}. ${linhas[i]}' : '• ${linhas[i]}'),
+          ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final url = (receita['imagem_url'] ?? '').toString();
+    return Scaffold(
+      appBar: AppBar(title: Text((receita['nome'] ?? 'Receita').toString()),
+          backgroundColor: Colors.deepOrange, foregroundColor: Colors.white),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 750),
+          child: ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
+              if (url.isNotEmpty)
+                ClipRRect(borderRadius: BorderRadius.circular(12),
+                  child: Image.network(url, height: 250, fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox(height: 120,
+                      child: Icon(Icons.restaurant, size: 60, color: Colors.deepOrange)))),
+              const SizedBox(height: 16),
+              Text((receita['nome'] ?? '').toString(), style: Theme.of(context).textTheme.headlineMedium),
+              const SizedBox(height: 8),
+              Text('Publicada por ${(receita['nome_autor'] ?? 'Usuário')}'),
+              const SizedBox(height: 8),
+              Text('${receita['tempo_preparo_min']} minutos de preparo'),
+              const SizedBox(height: 16),
+              Text((receita['descricao'] ?? '').toString()),
+              secao('Ingredientes', (receita['ingredientes'] ?? '').toString()),
+              secao('Utensílios', (receita['utensilios'] ?? '').toString()),
+              secao('Modo de preparo', (receita['modo_preparo'] ?? '').toString(), numerada: true),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 // PERFIL DO USUÁRIO (dados do Supabase Auth)
 class TelaPerfil extends StatefulWidget {
