@@ -11,13 +11,6 @@ jobs:
       - name: Baixar repositorio
         uses: actions/checkout@v4
 
-      - name: Verificar estrutura do projeto
-        run: |
-          pwd
-          ls -la
-          ls -la ap2_lsp
-          find . -name "pubspec.yaml"
-
       - name: Configurar Java
         uses: actions/setup-java@v4
         with:
@@ -31,21 +24,28 @@ jobs:
           cache: true
 
       - name: Criar arquivo .env
-        working-directory: ./ap2_lsp
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
         run: |
+          cd "$GITHUB_WORKSPACE/ap2_lsp"
           printf 'SUPABASE_URL=%s\n' "$SUPABASE_URL" > .env
           printf 'SUPABASE_PUBLISHABLE_KEY=%s\n' "$SUPABASE_PUBLISHABLE_KEY" >> .env
 
       - name: Instalar dependencias
-        working-directory: ./ap2_lsp
-        run: flutter pub get
+        run: |
+          cd "$GITHUB_WORKSPACE/ap2_lsp"
+          pwd
+          ls -la
+          test -f pubspec.yaml
+          which flutter
+          flutter --version
+          flutter pub get
 
       - name: Gerar APK
-        working-directory: ./ap2_lsp
-        run: flutter build apk --release
+        run: |
+          cd "$GITHUB_WORKSPACE/ap2_lsp"
+          flutter build apk --release
 
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
