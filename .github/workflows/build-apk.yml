@@ -11,6 +11,13 @@ jobs:
       - name: Baixar repositorio
         uses: actions/checkout@v4
 
+      - name: Verificar estrutura do projeto
+        run: |
+          pwd
+          ls -la
+          ls -la ap2_lsp
+          find . -name "pubspec.yaml"
+
       - name: Configurar Java
         uses: actions/setup-java@v4
         with:
@@ -24,6 +31,7 @@ jobs:
           cache: true
 
       - name: Criar arquivo .env
+        working-directory: ./ap2_lsp
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
@@ -32,13 +40,16 @@ jobs:
           printf 'SUPABASE_PUBLISHABLE_KEY=%s\n' "$SUPABASE_PUBLISHABLE_KEY" >> .env
 
       - name: Instalar dependencias
+        working-directory: ./ap2_lsp
         run: flutter pub get
 
       - name: Gerar APK
+        working-directory: ./ap2_lsp
         run: flutter build apk --release
 
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
         with:
           name: AP2_LSP-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: ap2_lsp/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
